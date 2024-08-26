@@ -19,9 +19,11 @@ const ticketSchema = new mongoose.Schema({
 const Ticket = mongoose.model('Ticket', ticketSchema);
 
 // Definir el esquema de asignación
+// Definir el esquema de asignación
 const assignmentSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   ticketId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ticket', required: true },
+  quantity: { type: Number, required: true },  // Agrega esta línea
 });
 
 const Assignment = mongoose.model('Assignment', assignmentSchema);
@@ -104,6 +106,28 @@ app.delete('/tickets/:id', async (req, res) => {
 });
 
 
+
+app.put('/tickets/:id', async (req, res) => {
+  const { id } = req.params;
+  const { quantity } = req.body;
+
+  try {
+    const ticket = await Ticket.findById(id);
+
+    if (!ticket) {
+      return res.status(404).json({ message: 'Ticket no encontrado' });
+    }
+
+    ticket.quantity = quantity;
+    await ticket.save();
+    
+    res.status(200).json(ticket);
+  } catch (error) {
+    res.status(500).json({ message: 'Error al actualizar la cantidad del ticket', error });
+  }
+});
+
+
 // Rutas para asignaciones
 app.get('/assignments', async (req, res) => {
   try {
@@ -116,13 +140,27 @@ app.get('/assignments', async (req, res) => {
 
 app.post('/assignments', async (req, res) => {
   try {
-    const { ticketId, userId } = req.body;
+    const { ticketId, userId, quantity } = req.body;
+
+    // Verificar si el ticket existe
+    const ticket = await Ticket.findById(ticketId);
+
+    if (!ticket) {
+      return res.status(404).json({ message: 'Ticket no encontrado' });
+    }
+
+    // Verificar si hay cantidad suficiente
+    if (ticket.quantity < quantity) {
+      return res.status(400).json({ message: 'No hay cantidad suficiente del ticket' });
+    }
 
     // Crear nueva asignación
-    const newAssignment = new Assignment({ ticketId, userId });
-
-    // Guardar en la base de datos
+    const newAssignment = new Assignment({ ticketId, userId, quantity });
     await newAssignment.save();
+
+    // Decrementar la cantidad del ticket
+    ticket.quantity -= quantity;
+    await ticket.save();
 
     res.status(201).json(newAssignment);
   } catch (error) {
@@ -130,6 +168,11 @@ app.post('/assignments', async (req, res) => {
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 });
+
+
+
+
+
 app.get('/assignments/user/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
@@ -140,6 +183,21 @@ app.get('/assignments/user/:userId', async (req, res) => {
   }
 });
 
+// Ruta para eliminar una asignación
+app.delete('/assignments/:id', async (req, res) => {
+  try {
+    const assignmentId = req.params.id;
+    const deletedAssignment = await Assignment.findByIdAndDelete(assignmentId);
+
+    if (!deletedAssignment) {
+      return res.status(404).json({ error: 'Asignación no encontrada' });
+    }
+
+    res.status(200).json({ message: 'Asignación eliminada con éxito' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al eliminar la asignación' });
+  }
+});
 
 app.listen(5000, () => {
   console.log('Servidor ejecutándose en el puerto 5000');

@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, FlatList, TouchableOpacity, Alert } from 'react-native';
+import { StyleSheet, View, Text, FlatList, TouchableOpacity, Alert, TextInput } from 'react-native';
 
-// URL de tu API
 const API_URL = 'http://192.168.1.173:5000';
 
 export default function UsersListScreen() {
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [userTickets, setUserTickets] = useState([]);
+  const [taxPercentage, setTaxPercentage] = useState(0);
+  const [tipPercentage, setTipPercentage] = useState(0);
+  const [tipAmount, setTipAmount] = useState(0);
 
   useEffect(() => {
-    // Obtener usuarios
     const fetchUsers = async () => {
       try {
         const response = await fetch(`${API_URL}/users`);
@@ -25,18 +26,17 @@ export default function UsersListScreen() {
     fetchUsers();
   }, []);
 
-  // Obtener tickets para el usuario seleccionado
   const fetchUserTickets = async (userId) => {
     try {
       const response = await fetch(`${API_URL}/assignments/user/${userId}`);
       const data = await response.json();
       console.log('Tickets del usuario:', data);
-      
+  
       if (data.length === 0) {
         Alert.alert('Sin Tickets', 'Este usuario no tiene tickets asignados.');
       }
-      
-      setUserTickets(data.map(assignment => assignment.ticketId)); // Extraer solo los tickets
+  
+      setUserTickets(data);
     } catch (error) {
       console.error("Error al obtener tickets del usuario: ", error);
     }
@@ -44,7 +44,41 @@ export default function UsersListScreen() {
 
   const handleSelectUser = (userId) => {
     setSelectedUser(userId);
-    fetchUserTickets(userId); // Obtener los tickets del usuario seleccionado
+    fetchUserTickets(userId);
+  };
+
+  const handleDeleteTicket = async (assignmentId) => {
+    try {
+      const response = await fetch(`${API_URL}/assignments/${assignmentId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        Alert.alert('Éxito', 'Ticket eliminado del usuario.');
+        fetchUserTickets(selectedUser); // Refrescar la lista de tickets después de eliminar
+      } else {
+        Alert.alert('Error', 'No se pudo eliminar el ticket.');
+      }
+    } catch (error) {
+      console.error('Error al eliminar el ticket:', error);
+      Alert.alert('Error', 'No se pudo eliminar el ticket.');
+    }
+  };
+
+  const calculateTotalWithTaxAndTip = () => {
+    // Calcular el total basado en el precio por la cantidad asignada
+    const total = userTickets.reduce((sum, item) => {
+      const price = item.ticketId?.price || 0;
+      const quantityAssigned = item.quantity || 0;
+      return sum + (price * quantityAssigned);
+    }, 0);
+
+    // Calcular el monto de tax y tip
+    const taxAmount = total * (taxPercentage / 100);
+    const tip = tipAmount > 0 ? tipAmount : total * (tipPercentage / 100);
+
+    // Retornar el total final con tax y tip
+    return total + taxAmount + tip;
   };
 
   const renderUserItem = ({ item }) => (
@@ -56,13 +90,26 @@ export default function UsersListScreen() {
     </TouchableOpacity>
   );
 
-  const renderTicketItem = ({ item }) => (
-    <View style={styles.ticketContainer}>
-      <Text style={styles.ticketText}>Producto: {item.productName}</Text>
-      <Text style={styles.ticketText}>Cantidad: {item.quantity}</Text>
-      <Text style={styles.ticketText}>Precio: ${item.price}</Text>
-    </View>
-  );
+  const renderTicketItem = ({ item }) => {
+    const productName = item.ticketId?.productName || 'Producto no disponible';
+    const quantityAssigned = item.quantity ?? 0;
+    const price = item.ticketId?.price ?? 0;
+  
+    return (
+      <View style={styles.ticketContainer}>
+        <Text style={styles.ticketText}>Producto: {productName}</Text>
+        <Text style={styles.ticketText}>Cantidad asignada: {quantityAssigned}</Text>
+        <Text style={styles.ticketText}>Precio: ${price}</Text>
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={() => handleDeleteTicket(item._id)}
+        >
+          <Text style={styles.deleteButtonText}>Eliminar</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+  
 
   return (
     <View style={styles.container}>
@@ -82,6 +129,39 @@ export default function UsersListScreen() {
             keyExtractor={(item) => item._id}
             contentContainerStyle={styles.ticketList}
           />
+          <View style={styles.taxContainer}>
+            <Text style={styles.taxLabel}>Tax:</Text>
+            <TextInput
+              style={styles.taxInput}
+              keyboardType="numeric"
+              placeholder="0"
+              value={String(taxPercentage)}
+              onChangeText={(value) => setTaxPercentage(parseFloat(value) || 0)}
+            />
+            <Text>%</Text>
+          </View>
+          <View style={styles.tipContainer}>
+            <Text style={styles.tipLabel}>Tip (porcentaje):</Text>
+            <TextInput
+              style={styles.tipInput}
+              keyboardType="numeric"
+              placeholder="0"
+              value={String(tipPercentage)}
+              onChangeText={(value) => setTipPercentage(parseFloat(value) || 0)}
+            />
+            <Text>%</Text>
+          </View>
+          <View style={styles.tipContainer}>
+            <Text style={styles.tipLabel}>Tip (valor):</Text>
+            <TextInput
+              style={styles.tipInput}
+              keyboardType="numeric"
+              placeholder="0"
+              value={String(tipAmount)}
+              onChangeText={(value) => setTipAmount(parseFloat(value) || 0)}
+            />
+          </View>
+          <Text style={styles.totalText}>Total con Tip y Tax: ${calculateTotalWithTaxAndTip().toFixed(2)}</Text>
         </View>
       )}
     </View>
@@ -95,10 +175,10 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 20,
-    marginBottom: 10, // Reducir margen inferior
+    marginBottom: 10,
   },
   userButton: {
-    marginBottom: 8, // Reducir margen inferior
+    marginBottom: 8,
     padding: 10,
     backgroundColor: '#007bff',
     borderRadius: 8,
@@ -110,10 +190,10 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   ticketsContainer: {
-    marginTop: 10, // Reducir espacio superior
+    marginTop: 10,
   },
   ticketContainer: {
-    marginBottom: 8, // Reducir margen inferior
+    marginBottom: 8,
     padding: 10,
     backgroundColor: '#f9f9f9',
     borderRadius: 8,
@@ -121,10 +201,52 @@ const styles = StyleSheet.create({
   ticketText: {
     fontSize: 16,
   },
-  userList: {
-    // Sin margen aquí, se ajusta con marginBottom en userButton
+  deleteButton: {
+    marginTop: 10,
+    backgroundColor: '#ff4d4d',
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
   },
-  ticketList: {
-    // Sin margen aquí, se ajusta con marginBottom en ticketContainer
+  deleteButtonText: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  taxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  taxLabel: {
+    fontSize: 16,
+    marginRight: 10,
+  },
+  taxInput: {
+    borderBottomWidth: 1,
+    padding: 5,
+    fontSize: 16,
+    width: 60,
+    textAlign: 'center',
+  },
+  tipContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  tipLabel: {
+    fontSize: 16,
+    marginRight: 10,
+  },
+  tipInput: {
+    borderBottomWidth: 1,
+    padding: 5,
+    fontSize: 16,
+    width: 60,
+    textAlign: 'center',
+  },
+  totalText: {
+    marginTop: 20,
+    fontSize: 18,
+    fontWeight: 'bold',
   },
 });

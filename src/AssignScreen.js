@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, Button, FlatList, Modal, TouchableOpacity, Alert } from 'react-native';
+import { StyleSheet, View, Text, Button, Modal, TouchableOpacity, Alert, TextInput } from 'react-native';
 
 export default function AssignScreen() {
   const [users, setUsers] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedTicket, setSelectedTicket] = useState(null);
+  const [ticketQuantity, setTicketQuantity] = useState('');
   const [showUserModal, setShowUserModal] = useState(false);
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [assignments, setAssignments] = useState([]);
-  const [userAssignments, setUserAssignments] = useState({});
 
   const API_URL = 'http://192.168.1.173:5000';
 
@@ -19,65 +19,51 @@ export default function AssignScreen() {
         const usersResponse = await fetch(`${API_URL}/users`);
         const usersData = await usersResponse.json();
         setUsers(usersData);
-  
+
         const ticketsResponse = await fetch(`${API_URL}/tickets`);
         const ticketsData = await ticketsResponse.json();
         setTickets(ticketsData);
-  
+
         const assignmentsResponse = await fetch(`${API_URL}/assignments`);
         const assignmentsData = await assignmentsResponse.json();
         setAssignments(assignmentsData);
-  
-        const userAssignmentsMap = {};
-        for (const assignment of assignmentsData) {
-          if (!assignment.userId || !assignment.ticketId) {
-            console.error('Asignación incompleta:', assignment);
-            continue;
-          }
-  
-          const ticket = tickets.find(t => t._id === assignment.ticketId._id);
-  
-          if (!ticket) {
-            console.error('Ticket no encontrado para la asignación:', assignment);
-            continue;
-          }
-  
-          if (!userAssignmentsMap[assignment.userId._id]) {
-            userAssignmentsMap[assignment.userId._id] = { tickets: [], total: 0 };
-          }
-          userAssignmentsMap[assignment.userId._id].tickets.push(ticket);
-          userAssignmentsMap[assignment.userId._id].total += ticket.price || 0;
-        }
-        setUserAssignments(userAssignmentsMap);
+
       } catch (error) {
         console.error("Error al obtener datos: ", error);
       }
     };
-  
+
     fetchData();
   }, []);
-  
+
   const handleAssignTicket = async () => {
-    if (!selectedUser || !selectedTicket) {
-      Alert.alert('Error', 'Por favor, selecciona un usuario y un ticket.');
+    if (!selectedUser || !selectedTicket || !ticketQuantity) {
+      Alert.alert('Error', 'Por favor, selecciona un usuario, un ticket y una cantidad.');
       return;
     }
   
-    const ticketAlreadyAssigned = assignments.some(assignment =>
-      assignment.ticketId._id === selectedTicket && assignment.userId._id === selectedUser
-    );
+    const quantity = parseInt(ticketQuantity);
   
-    if (ticketAlreadyAssigned) {
-      Alert.alert('Error', 'El ticket ya ha sido asignado a otro usuario.');
+    if (isNaN(quantity) || quantity <= 0) {
+      Alert.alert('Error', 'La cantidad debe ser un número positivo.');
+      return;
+    }
+  
+    const ticket = tickets.find(ticket => ticket._id === selectedTicket);
+  
+    if (!ticket || quantity > ticket.quantity) {
+      Alert.alert('Error', 'La cantidad solicitada excede la cantidad disponible del ticket.');
       return;
     }
   
     const newAssignment = {
       ticketId: selectedTicket,
-      userId: selectedUser
+      userId: selectedUser,
+      quantity: quantity
     };
   
     try {
+      // Hacer la asignación del ticket al usuario
       const response = await fetch(`${API_URL}/assignments`, {
         method: 'POST',
         headers: {
@@ -87,10 +73,34 @@ export default function AssignScreen() {
       });
   
       if (response.ok) {
-        const result = await response.json();
-        console.log('Asignación exitosa:', result);
-        setAssignments([...assignments, result]);
-        Alert.alert('Éxito', 'El ticket ha sido asignado al usuario.');
+        // Actualizar la cantidad del ticket en la base de datos
+        const updatedTicketQuantity = ticket.quantity - quantity;
+  
+        const updateResponse = await fetch(`${API_URL}/tickets/${selectedTicket}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ quantity: updatedTicketQuantity }),
+        });
+  
+        if (updateResponse.ok) {
+          // Actualizar la cantidad del ticket en el estado de la aplicación
+          setTickets(tickets.map(ticket =>
+            ticket._id === selectedTicket
+              ? { ...ticket, quantity: updatedTicketQuantity }
+              : ticket
+          ));
+  
+          const result = await response.json();
+          console.log('Asignación exitosa:', result);
+          setAssignments([...assignments, result]);
+          Alert.alert('Éxito', 'El ticket ha sido asignado al usuario y la cantidad se ha actualizado.');
+          setTicketQuantity(''); // Limpiar el campo de cantidad
+        } else {
+          console.error('Error al actualizar la cantidad del ticket:', await updateResponse.text());
+          Alert.alert('Error', 'No se pudo actualizar la cantidad del ticket.');
+        }
       } else {
         console.error('Error en la solicitud:', await response.text());
         Alert.alert('Error', 'No se pudo asignar el ticket.');
@@ -101,8 +111,6 @@ export default function AssignScreen() {
     }
   };
   
-
-  const totalPrice = tickets.reduce((total, ticket) => total + (ticket.price || 0), 0);
 
   return (
     <View style={styles.container}>
@@ -117,6 +125,14 @@ export default function AssignScreen() {
         <Text style={styles.buttonText}>Selecciona un Ticket</Text>
       </TouchableOpacity>
       <Text style={styles.selectionText}>Ticket Seleccionado: {tickets.find(ticket => ticket._id === selectedTicket)?.productName || 'Ninguno'}</Text>
+
+      <TextInput
+        style={styles.input}
+        value={ticketQuantity}
+        onChangeText={setTicketQuantity}
+        placeholder="Cantidad"
+        keyboardType="numeric"
+      />
 
       <TouchableOpacity style={styles.button} onPress={handleAssignTicket}>
         <Text style={styles.buttonText}>Asignar Ticket</Text>
@@ -136,7 +152,7 @@ export default function AssignScreen() {
                 key={user._id}
                 style={styles.modalButton}
                 onPress={() => {
-                  console.log('Usuario seleccionado:', user); // Log del usuario seleccionado
+                  console.log('Usuario seleccionado:', user);
                   setSelectedUser(user._id);
                   setShowUserModal(false);
                 }}
@@ -160,19 +176,21 @@ export default function AssignScreen() {
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Selecciona un Ticket</Text>
-            {tickets.map(ticket => (
-              <TouchableOpacity
-                key={ticket._id}
-                style={styles.modalButton}
-                onPress={() => {
-                  console.log('Ticket seleccionado:', ticket); // Log del ticket seleccionado
-                  setSelectedTicket(ticket._id);
-                  setShowTicketModal(false);
-                }}
-              >
-                <Text>{ticket.productName}</Text>
-              </TouchableOpacity>
-            ))}
+            {tickets
+              .filter(ticket => ticket.quantity > 0)
+              .map(ticket => (
+                <TouchableOpacity
+                  key={ticket._id}
+                  style={styles.modalButton}
+                  onPress={() => {
+                    console.log('Ticket seleccionado:', ticket);
+                    setSelectedTicket(ticket._id);
+                    setShowTicketModal(false);
+                  }}
+                >
+                  <Text>{ticket.productName} - {ticket.quantity} disponibles</Text>
+                </TouchableOpacity>
+              ))}
             <TouchableOpacity style={styles.closeButton} onPress={() => setShowTicketModal(false)}>
               <Text style={styles.closeButtonText}>Cerrar</Text>
             </TouchableOpacity>
@@ -180,23 +198,6 @@ export default function AssignScreen() {
         </View>
       </Modal>
 
-      <Text style={styles.title}>Tickets Asignados</Text>
-
-      <View style={styles.listContainer}>
-        <FlatList
-          data={tickets}
-          renderItem={({ item }) => (
-            <View style={styles.ticketContainer}>
-              <Text style={styles.ticketText}>Producto: {item.productName}</Text>
-              <Text style={styles.ticketText}>Cantidad: {item.quantity}</Text>
-              <Text style={styles.ticketText}>Precio: ${item.price?.toFixed(2) || '0.00'}</Text>
-            </View>
-          )}
-          keyExtractor={(item) => item._id}
-        />
-      </View>
-
-      <Text style={styles.totalText}>Total: ${totalPrice.toFixed(2)}</Text>
     </View>
   );
 }
@@ -206,7 +207,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f0f0f0', // Fondo gris claro
+    backgroundColor: '#f0f0f0',
     padding: 20,
   },
   title: {
@@ -265,24 +266,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
   },
-  listContainer: {
-    height: 200, // Altura fija para la lista desplazable
+  input: {
     width: '100%',
-  },
-  ticketContainer: {
     padding: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ccc',
-    backgroundColor: '#fff', // Fondo blanco para los tickets
+    borderColor: '#ccc',
+    borderWidth: 1,
     borderRadius: 5,
-    marginBottom: 10,
-  },
-  ticketText: {
-    fontSize: 16,
-  },
-  totalText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginTop: 10,
+    marginBottom: 15,
   },
 });
