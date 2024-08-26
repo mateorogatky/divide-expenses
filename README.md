@@ -1,2 +1,2 @@
 # divide-expenses
-as
+App to split tickets
